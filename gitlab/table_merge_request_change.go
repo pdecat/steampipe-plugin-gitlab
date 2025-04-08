@@ -7,7 +7,7 @@ import (
 	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
 	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
 	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
-	apiLegacy "github.com/xanzy/go-gitlab"
+	api "gitlab.com/gitlab-org/api/client-go"
 )
 
 func tableMergeRequestChange() *plugin.Table {
@@ -25,7 +25,7 @@ func tableMergeRequestChange() *plugin.Table {
 // Hydrate Functions
 func listChanges(ctx context.Context, d *plugin.QueryData, _ *plugin.HydrateData) (interface{}, error) {
 	plugin.Logger(ctx).Debug("listChanges", "started")
-	conn, err := connectLegacy(ctx, d)
+	conn, err := connect(ctx, d)
 	if err != nil {
 		plugin.Logger(ctx).Error("listChanges", "unable to establish a connection", err)
 		return nil, fmt.Errorf("unable to establish a connection: %v", err)
@@ -36,15 +36,14 @@ func listChanges(ctx context.Context, d *plugin.QueryData, _ *plugin.HydrateData
 	projectId := int(q["project_id"].GetInt64Value())
 
 	plugin.Logger(ctx).Debug("listChanges", "projectId", projectId, "iid", iid)
-	mergeRequest, _, err := conn.MergeRequests.GetMergeRequest(projectId, iid, &apiLegacy.GetMergeRequestsOptions{})
+	diffs, _, err := conn.MergeRequests.ListMergeRequestDiffs(projectId, iid, &api.ListMergeRequestDiffsOptions{})
 	if err != nil {
 		plugin.Logger(ctx).Error("listChanges", "projectId", projectId, "iid", iid, "error", err)
 		return nil, fmt.Errorf("unable to obtain changes for merge request %d for project_id %d\n%v", iid, projectId, err)
 	}
 
-	// FIXME: this is not available in gitlab.com/gitlab-org/api/client-go
-	for _, change := range mergeRequest.Changes {
-		d.StreamListItem(ctx, change)
+	for _, diff := range diffs {
+		d.StreamListItem(ctx, diff)
 	}
 
 	plugin.Logger(ctx).Debug("listChanges", "completed successfully")
