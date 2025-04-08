@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strings"
+	"time"
 
 	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
 	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
@@ -79,10 +81,30 @@ func getProjectJobTrace(ctx context.Context, d *plugin.QueryData, h *plugin.Hydr
 	jobId := h.Item.(*api.Job).ID
 	plugin.Logger(ctx).Debug("getProjectJobTrace", "projectId", projectId, "jobId", jobId)
 
-	traceReader, resp, err := conn.Jobs.GetTraceFile(projectId, jobId)
-	if err != nil {
+	var traceReader io.Reader
+	var resp *api.Response
+	maxRetries := 3
+	retryDelay := 1 * time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		traceReader, resp, err = conn.Jobs.GetTraceFile(projectId, jobId)
+		if err == nil {
+			// Success, break the loop
+			break
+		}
+
+		// Check if the error is a timeout error and if we should retry
+		if strings.Contains(err.Error(), "read: connection timed out") && i < maxRetries-1 {
+			plugin.Logger(ctx).Warn("getProjectJobTrace", "projectId", projectId, "jobId", jobId, "attempt", i+1, "error", err, "retrying...")
+			plugin.Logger(ctx).Warn("getProjectJobTrace", "delaying", retryDelay)
+			time.Sleep(retryDelay)
+			retryDelay *= 2 // Exponential backoff
+			continue
+		}
+
+		// If it's not a timeout error or the last retry failed, return the error
 		plugin.Logger(ctx).Error("getProjectJobTrace", "projectId", projectId, "jobId", jobId, "resp", resp, "error", err)
-		return nil, fmt.Errorf("unable to obtain trace of job %d for project_id %d\n%v", jobId, projectId, err)
+		return nil, fmt.Errorf("unable to obtain trace of job %d for project_id %d after %d attempts\n%v", jobId, projectId, i+1, err)
 	}
 
 	traceBytes, err := io.ReadAll(traceReader)
