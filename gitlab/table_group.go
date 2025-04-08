@@ -3,11 +3,13 @@ package gitlab
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/turbot/steampipe-plugin-sdk/v5/grpc/proto"
 	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
 	"github.com/turbot/steampipe-plugin-sdk/v5/plugin/transform"
-	api "github.com/xanzy/go-gitlab"
-	"strings"
+	"gitlab.com/gitlab-org/api/client-go"
+	api "gitlab.com/gitlab-org/api/client-go"
 )
 
 func tableGroup() *plugin.Table {
@@ -16,10 +18,13 @@ func tableGroup() *plugin.Table {
 		Description: "Obtain information about groups within the GitLab instance.",
 		List: &plugin.ListConfig{
 			Hydrate: listGroups,
+			KeyColumns: []*plugin.KeyColumn{
+				{Name: "visibility", Require: plugin.Optional},
+			},
 		},
 		Get: &plugin.GetConfig{
-			KeyColumns: plugin.SingleColumn("id"),
 			Hydrate:    getGroup,
+			KeyColumns: plugin.SingleColumn("id"),
 		},
 		Columns: groupColumns(),
 	}
@@ -34,16 +39,20 @@ func listGroups(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData)
 		return nil, fmt.Errorf("unable to establish a connection: %v", err)
 	}
 
+	q := d.EqualsQuals
 	stats := true
 	opt := &api.ListGroupsOptions{Statistics: &stats, ListOptions: api.ListOptions{
-		Page:    1,
-		PerPage: 50,
+		Pagination: "keyset",
+		PerPage:    50,
 	}}
+	opt = addOptionalGroupQualifiers(ctx, opt, q)
+
+	options := []api.RequestOptionFunc{}
 
 	for {
 		plugin.Logger(ctx).Debug("listGroups", "page", opt.Page, "perPage", opt.PerPage)
 
-		groups, resp, err := conn.Groups.ListGroups(opt)
+		groups, resp, err := conn.Groups.ListGroups(opt, options...)
 		if err != nil {
 			plugin.Logger(ctx).Error("listGroups", "page", opt.Page, "error", err)
 			return nil, fmt.Errorf("unable to obtain groups\n%v", err)
@@ -58,11 +67,13 @@ func listGroups(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData)
 			}
 		}
 
-		if resp.NextPage == 0 {
+		if resp.NextLink == "" {
 			break
 		}
 
-		opt.Page = resp.NextPage
+		options = []api.RequestOptionFunc{
+			gitlab.WithKeysetPaginationParameters(resp.NextLink),
+		}
 	}
 
 	plugin.Logger(ctx).Debug("listGroups", "completed successfully")
@@ -93,6 +104,16 @@ func getGroup(ctx context.Context, d *plugin.QueryData, h *plugin.HydrateData) (
 
 	plugin.Logger(ctx).Debug("getGroup", "completed successfully")
 	return group, nil
+}
+
+func addOptionalGroupQualifiers(ctx context.Context, opts *api.ListGroupsOptions, q map[string]*proto.QualValue) *api.ListGroupsOptions {
+	// if q["visibility"] != nil {
+	// 	visibility := q["visibility"].GetStringValue()
+	// 	opts.Visibility = &visibility
+	// 	plugin.Logger(ctx).Debug("listGroups", "filter[visibility]", visibility)
+	// }
+
+	return opts
 }
 
 // Column Function
