@@ -53,6 +53,10 @@ func connect(ctx context.Context, d *plugin.QueryData) (*api.Client, error) {
 }
 
 func connectLegacy(ctx context.Context, d *plugin.QueryData) (*apiLegacy.Client, error) {
+	cacheKey := "gitlab-legacy"
+	if cachedData, ok := d.ConnectionCache.Get(ctx, cacheKey); ok {
+		return cachedData.(*apiLegacy.Client), nil
+	}
 	baseUrl := os.Getenv("GITLAB_ADDR")
 	token := os.Getenv("GITLAB_TOKEN")
 
@@ -79,6 +83,9 @@ func connectLegacy(ctx context.Context, d *plugin.QueryData) (*apiLegacy.Client,
 		plugin.Logger(ctx).Error("unable to create legacy client", "baseUrl", baseUrl, "error", err)
 		return nil, err
 	}
+
+	// Save to cache
+	d.ConnectionCache.Set(ctx, cacheKey, client)
 
 	return client, nil
 }
